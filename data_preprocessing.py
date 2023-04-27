@@ -4,7 +4,7 @@ import numpy as np
 import biosppy
 from hrvanalysis import remove_outliers, remove_ectopic_beats, interpolate_nan_values
 
-PATH_EDF = '/home/mkopcz/Desktop/sleep-phases-detection/sleep-phases-detection/haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/SN134.edf'
+PATH_EDF = 'haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/SN134.edf'
 
 def loading_ecg_data(file):
     with open(file) as f:
