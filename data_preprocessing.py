@@ -2,25 +2,10 @@ import mne
 import matplotlib.pyplot as plt
 import numpy as np
 import biosppy
-from hrvanalysis import remove_outliers, remove_ectopic_beats, interpolate_nan_values, get_time_domain_features
-import json
+from hrvanalysis import remove_outliers, remove_ectopic_beats, interpolate_nan_values, get_time_domain_features, get_frequency_domain_features, get_geometrical_features, get_poincare_plot_features, get_csi_cvi_features
 import re
 import pandas as pd
 import os
-
-class NumpyEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (np.int_, np.intc, np.intp, np.int8,
-                            np.int16, np.int32, np.int64, np.uint8,
-                            np.uint16, np.uint32, np.uint64)):
-            return int(obj)
-        elif isinstance(obj, (np.float_, np.float16, np.float32,
-                              np.float64)):
-            return float(obj)
-        elif isinstance(obj, (np.ndarray,)):
-            return obj.tolist()
-        return json.JSONEncoder.default(self, obj)
-
 
 def extract_patient_index(path):
     match = re.search(r'SN\d+', path)
@@ -72,19 +57,36 @@ def plot_ecg_and_r_peaks(ecg_data, out):
     plt.show()
 
 
+
 def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=''):
     num_intervals = len(interpolated_nn_intervals)
     epoch_intervals = int(window_duration)
     step_intervals = int(step_size)
+    hrv_indices = []
 
     for i in range(0, num_intervals - epoch_intervals + step_intervals, step_intervals):
         epoch_nn_intervals = interpolated_nn_intervals[i:i + epoch_intervals]
-        hrv_indices = get_time_domain_features(epoch_nn_intervals)
-        hrv_indices['patient_index'] = patient_index
+        if len(epoch_nn_intervals) == 0:
+            print(f"Empty nn_intervals for epoch {i}-{i+epoch_intervals}")
+            continue
+        try:
+            time_domain_features = get_time_domain_features(epoch_nn_intervals)
+            frequency_domain_features = get_frequency_domain_features(epoch_nn_intervals)
+            poincare_plot_features = get_poincare_plot_features(epoch_nn_intervals)
+            csi_cvi_features = get_csi_cvi_features(epoch_nn_intervals)
+            epoch_hrv_indices = {}
+            epoch_hrv_indices.update(time_domain_features)
+            epoch_hrv_indices.update(frequency_domain_features)
+            epoch_hrv_indices.update(poincare_plot_features)
+            epoch_hrv_indices.update(csi_cvi_features)
+            epoch_hrv_indices['patient_index'] = patient_index
+            epoch_hrv_indices['epoch_index'] = i // step_intervals + 1
+            hrv_indices.append(epoch_hrv_indices)
+        except ValueError as e:
+            print(f"Error calculating features for epoch {i}-{i+epoch_intervals}: {str(e)}")
+            continue
 
-        output_file = f'json_data/hrv_analysis_{patient_index}.json'
-        with open(output_file, 'w') as f:
-            json.dump(hrv_indices, f, cls=NumpyEncoder, sort_keys=True, indent=4)
+    return pd.DataFrame(hrv_indices)
 
 def main():
 
@@ -101,26 +103,17 @@ def main():
             if os.path.isfile(file_path):
                 edf_paths.append(file_path)
 
-
+    df_data = []
     for i in range(len(edf_paths)):
         data = loading_ecg_data(edf_paths[i])
-        ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals = process_data(
-        data)
+        ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals = process_data(data)
         patient_index = extract_patient_index(edf_paths[i])
-        hrv_analysis(interpolated_nn_intervals, patient_index=patient_index)
+        hrv_indices = hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=patient_index)
+        if hrv_indices is not None:
+            df_data.append(hrv_indices)
 
-    path = 'json_data/'
-    df_data = []
-    files = os.listdir(path)
-
-    for i in range(len(files)):
-        with open('json_data/' + files[i], 'r') as f:
-            data_dict = json.load(f)
-            df = pd.DataFrame.from_dict(data_dict, orient="index").transpose()
-            df.set_index(df['patient_index'], inplace=True)
-            df.drop("patient_index", axis='columns', inplace=True)
-            df_data.append(df)
     result = pd.concat(df_data)
+    result.set_index("patient_index", inplace=True)
     result.to_csv('features.csv')
 
 if __name__ == '__main__':
