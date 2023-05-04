@@ -6,9 +6,7 @@ from hrvanalysis import remove_outliers, remove_ectopic_beats, interpolate_nan_v
 import json
 import re
 import pandas as pd
-
-PATH_EDF = 'haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/SN134.edf'
-
+import os
 
 class NumpyEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -31,10 +29,6 @@ def extract_patient_index(path):
     else:
         return None
 
-
-patient_index = extract_patient_index(PATH_EDF)
-
-
 def loading_ecg_data(file):
     data = mne.io.read_raw_edf(file, preload=True)
     return data
@@ -48,7 +42,7 @@ def process_data(data):
     ecg_channel_name = channels[ecg_channel_idx]
     ecg_data = raw_data[ecg_channel_idx]
     sampling_rate = info['sfreq']
-    #
+
     # time_samples = int(5 * 60 * sampling_rate)
     # ecg_data = ecg_data[:time_samples]
 
@@ -78,7 +72,7 @@ def plot_ecg_and_r_peaks(ecg_data, out):
     plt.show()
 
 
-def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index='SN134'):
+def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=''):
     num_intervals = len(interpolated_nn_intervals)
     epoch_intervals = int(window_duration)
     step_intervals = int(step_size)
@@ -87,30 +81,46 @@ def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, p
         epoch_nn_intervals = interpolated_nn_intervals[i:i + epoch_intervals]
         hrv_indices = get_time_domain_features(epoch_nn_intervals)
         hrv_indices['patient_index'] = patient_index
-        # print(f"Epoch {i // step_intervals + 1}:")
-        # print(hrv_indices)
 
-        output_file = f'hrv_analysis_{patient_index}.json'
+        output_file = f'json_data/hrv_analysis_{patient_index}.json'
         with open(output_file, 'w') as f:
             json.dump(hrv_indices, f, cls=NumpyEncoder, sort_keys=True, indent=4)
 
-
 def main():
-    data = loading_ecg_data(PATH_EDF)
-    ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals = process_data(
+
+    edf_paths = []
+    for i in range(12, 155):
+        if i < 100:
+            file_name = f"SN0{i}.edf"
+            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
+            if os.path.isfile(file_path):
+                edf_paths.append(file_path)
+        else:
+            file_name = f"SN{i}.edf"
+            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
+            if os.path.isfile(file_path):
+                edf_paths.append(file_path)
+
+
+    for i in range(len(edf_paths)):
+        data = loading_ecg_data(edf_paths[i])
+        ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals = process_data(
         data)
-    patient_index = extract_patient_index(PATH_EDF)
-    hrv_analysis(interpolated_nn_intervals, patient_index=patient_index)
+        patient_index = extract_patient_index(edf_paths[i])
+        hrv_analysis(interpolated_nn_intervals, patient_index=patient_index)
 
-    with open('hrv_analysis_SN134.json', 'r') as f:
-        data_dict = json.load(f)
-    df = pd.DataFrame.from_dict(data_dict, orient="index").transpose()
+    path = 'json_data/'
+    df_data = []
+    files = os.listdir(path)
 
-    # Set the index of the DataFrame to the patient index
-    df['patient_index'] = patient_index
-    df.set_index('patient_index', inplace=True)
-    print(df)
-
+    for i in range(len(files)):
+        with open('json_data/' + files[i], 'r') as f:
+            data_dict = json.load(f)
+            df = pd.DataFrame.from_dict(data_dict, orient="index").transpose()
+            df.set_index(df['patient_index'], inplace=True)
+            df_data.append(df)
+    result = pd.concat(df_data)
+    result.to_csv('features.csv')
 
 if __name__ == '__main__':
     main()
