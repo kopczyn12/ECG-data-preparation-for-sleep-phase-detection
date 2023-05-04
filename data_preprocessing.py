@@ -154,7 +154,8 @@ def concatenate_sleep_scoring_files(directory_path):
                 data_frames.append(df[['Annotation', 'patient_index']].iloc[1:])
 
     concatenated_df = pd.concat(data_frames)  # concatenate all data frames
-    concatenated_df.set_index("patient_index", inplace=True)  # reset the index
+    concatenated_df['Annotation'] = concatenated_df['Annotation'].str.replace('Sleep stage ', '') # remove 'Sleep stage' from Annotation column values
+    concatenated_df.set_index("patient_index", inplace=True)  # set the patient_index column as the index
     return concatenated_df
 
 def main():
@@ -190,5 +191,6 @@ def main():
     result_final.to_csv('features.csv')
     annotations = concatenate_sleep_scoring_files('haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/')
     annotations.to_csv('annotations.csv')
+
 if __name__ == '__main__':
     main()
