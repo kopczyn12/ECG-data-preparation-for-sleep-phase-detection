@@ -133,6 +133,30 @@ def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, p
 
     return pd.DataFrame(hrv_indices)
 
+def concatenate_sleep_scoring_files(directory_path):
+    data_frames = []  # list to hold all data frames
+    filenames = os.listdir(directory_path)
+    filenames.sort()  # sort the filenames in ascending order
+
+    annotation_set = False
+    for filename in filenames:
+        if filename.endswith('.txt'):
+            file_path = os.path.join(directory_path, filename)
+            patient_index = filename.split('_')[0]  # get the patient index from the filename
+
+            df = pd.read_csv(file_path, sep=',', header=None, usecols=[4], skiprows=1, names=['Annotation'])
+            df['patient_index'] = patient_index  # add the patient index column
+
+            if not annotation_set:
+                annotation_set = True
+                data_frames.append(df[['Annotation', 'patient_index']])
+            else:
+                data_frames.append(df[['Annotation', 'patient_index']].iloc[1:])
+
+    concatenated_df = pd.concat(data_frames)  # concatenate all data frames
+    concatenated_df.set_index("patient_index", inplace=True)  # reset the index
+    return concatenated_df
+
 def main():
 
     edf_paths = []
@@ -164,6 +188,7 @@ def main():
                           , 'hf', 'lf_hf_ratio', 'hfnu', 'total_power', 'vlf', 'sd1', 'sd2', 'ratio_sd2_sd1',
                            'Modified_csi'], axis=1)
     result_final.to_csv('features.csv')
-
+    annotations = concatenate_sleep_scoring_files('haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/')
+    annotations.to_csv('annotations.csv')
 if __name__ == '__main__':
     main()
