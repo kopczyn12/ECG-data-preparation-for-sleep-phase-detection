@@ -118,6 +118,7 @@ def main():
             data_dict = json.load(f)
             df = pd.DataFrame.from_dict(data_dict, orient="index").transpose()
             df.set_index(df['patient_index'], inplace=True)
+            df.drop("patient_index", axis='columns', inplace=True)
             df_data.append(df)
     result = pd.concat(df_data)
     result.to_csv('features.csv')
