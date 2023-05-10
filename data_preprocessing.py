@@ -21,6 +21,7 @@ def loading_ecg_data(file):
 
 
 def process_data(data):
+
     raw_data = data.get_data()
     info = data.info
     channels = data.ch_names
@@ -28,15 +29,13 @@ def process_data(data):
     ecg_channel_name = channels[ecg_channel_idx]
     ecg_data = raw_data[ecg_channel_idx]
     sampling_rate = info['sfreq']
-
-    # time_samples = int(5 * 60 * sampling_rate)
+    # print(sampling_rate)
+    # time_samples = int(0.16 * 60 * sampling_rate)
     # ecg_data = ecg_data[:time_samples]
-
-    # Process the ECG data and detect R-peaks
+   
     out = biosppy.signals.ecg.ecg(ecg_data, sampling_rate=sampling_rate, show=False)
-
-    # Get R-R intervals
-    rr_intervals_list = np.diff(out['rpeaks'])
+    rr_intervals_list = np.diff(out["ts"][out['rpeaks']]) * 1000 
+    
     # Preprocess R-R intervals
     rr_intervals_without_outliers = remove_outliers(rr_intervals=rr_intervals_list, low_rri=300, high_rri=2000)
     interpolated_rr_intervals = interpolate_nan_values(rr_intervals=rr_intervals_without_outliers,
@@ -45,7 +44,6 @@ def process_data(data):
     interpolated_nn_intervals = interpolate_nan_values(rr_intervals=nn_intervals_list)
 
     return ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals
-
 
 def plot_ecg_and_r_peaks(ecg_data, out):
     plt.figure()
@@ -57,13 +55,12 @@ def plot_ecg_and_r_peaks(ecg_data, out):
     plt.legend()
     plt.show()
 
-
-
 def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=''):
     num_intervals = len(interpolated_nn_intervals)
     epoch_intervals = int(window_duration)
     step_intervals = int(step_size)
     hrv_indices = []
+    hr_values = []
 
     for i in range(0, num_intervals - epoch_intervals + step_intervals, step_intervals):
         epoch_nn_intervals = interpolated_nn_intervals[i:i + epoch_intervals]
@@ -75,11 +72,21 @@ def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, p
             frequency_domain_features = get_frequency_domain_features(epoch_nn_intervals)
             poincare_plot_features = get_poincare_plot_features(epoch_nn_intervals)
             csi_cvi_features = get_csi_cvi_features(epoch_nn_intervals)
+            
+            # separate csv for hr
+            epoch_hr = {}
+            epoch_hr['mean_hr'] = time_domain_features['mean_hr']
+            epoch_hr['patient_index'] = patient_index
+            epoch_hr['epoch_index'] = i // step_intervals + 1
+            hr_values.append(epoch_hr)
+
+            #separate for hrv analysis
             epoch_hrv_indices = {}
             epoch_hrv_indices.update(time_domain_features)
             epoch_hrv_indices.update(frequency_domain_features)
             epoch_hrv_indices.update(poincare_plot_features)
             epoch_hrv_indices.update(csi_cvi_features)
+
             # calculate asymmetry of Poincare plot area index
             left_area = poincare_plot_features['sd1'] ** 2
             right_area = poincare_plot_features['sd2'] ** 2
@@ -103,6 +110,7 @@ def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, p
             epoch_hrv_indices['Ca'] = total_contributions_a
             epoch_hrv_indices['SD2d'] = np.var(epoch_hrv_indices['Cd'])
             epoch_hrv_indices['SD2a'] = np.var(epoch_hrv_indices['Ca'])
+
             # calculate percentage of inflection points of RR intervals series
             rr_diff = np.diff(epoch_nn_intervals)
             num_inflection_points = ((rr_diff[1:] > 0) & (rr_diff[:-1] < 0)).sum()
@@ -127,11 +135,13 @@ def hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, p
             epoch_hrv_indices['patient_index'] = patient_index
             epoch_hrv_indices['epoch_index'] = i // step_intervals + 1
             hrv_indices.append(epoch_hrv_indices)
+
         except ValueError as e:
             print(f"Error calculating features for epoch {i}-{i+epoch_intervals}: {str(e)}")
             continue
 
-    return pd.DataFrame(hrv_indices)
+
+    return pd.DataFrame(hrv_indices), pd.DataFrame(hr_values)
 
 def concatenate_sleep_scoring_files(directory_path):
     data_frames = []  # list to hold all data frames
@@ -160,37 +170,39 @@ def concatenate_sleep_scoring_files(directory_path):
 
 def main():
 
-    edf_paths = []
-    for i in range(12, 155):
-        if i < 100:
-            file_name = f"SN0{i}.edf"
-            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
-            if os.path.isfile(file_path):
-                edf_paths.append(file_path)
-        else:
-            file_name = f"SN{i}.edf"
-            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
-            if os.path.isfile(file_path):
-                edf_paths.append(file_path)
+    file_name = "SN015.edf"
+    file_path = os.path.join("/home/mkopcz/Desktop/hrv-analiza/haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings", file_name)
+    print(f"Checking file: {file_path}")
 
-    df_data = []
-    for i in range(len(edf_paths)):
-        data = loading_ecg_data(edf_paths[i])
+    if os.path.isfile(file_path):
+        print(f"Processing file: {file_path}")
+        edf_path = file_path
+        data = loading_ecg_data(edf_path)
         ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals = process_data(data)
-        patient_index = extract_patient_index(edf_paths[i])
-        hrv_indices = hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=patient_index)
-        if hrv_indices is not None:
-            df_data.append(hrv_indices)
+        patient_index = extract_patient_index(file_path)
+        print(patient_index)
+        hrv_indices, heart_rate_value = hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=patient_index)
+        # plot_ecg_and_r_peaks(ecg_data, out)
+        print(heart_rate_value)
 
-    result = pd.concat(df_data)
-    result.set_index("patient_index", inplace=True)
-    result_final = result.drop(['sdnn', 'cvnni', 'cvi', 'nni_50', 'nni_20', 'pnni_20', 'rmssd', 'range_nni',
-                          'cvsd', 'mean_hr', 'max_hr', 'min_hr', 'std_hr', 'lf'
-                          , 'hf', 'lf_hf_ratio', 'hfnu', 'total_power', 'vlf', 'sd1', 'sd2', 'ratio_sd2_sd1',
-                           'Modified_csi'], axis=1)
-    result_final.to_csv('features.csv')
-    annotations = concatenate_sleep_scoring_files('haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/')
-    annotations.to_csv('annotations.csv')
+        if heart_rate_value is not None:
+            print(f"Writing HR results to results_hr.csv")
+            heart_rate_value.set_index("patient_index", inplace=True)
+            heart_rate_value.to_csv('results_hr.csv')
+
+        if hrv_indices is not None:
+            print(f"Writing HRV indices to features.csv")
+            hrv_indices.set_index("patient_index", inplace=True)
+            result_final = hrv_indices.drop(['sdnn', 'cvnni', 'cvi', 'nni_50', 'nni_20', 'pnni_20', 'rmssd', 'range_nni',
+                                      'cvsd','std_hr', 'lf', 'hf', 'lf_hf_ratio', 'hfnu', 'total_power', 'vlf',
+                                      'sd1', 'sd2', 'ratio_sd2_sd1','Modified_csi'], axis=1)
+            result_final.to_csv('features.csv')
+
+        print(f"Writing annotations to annotations.csv")
+        annotations = concatenate_sleep_scoring_files('haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/')
+        annotations.to_csv('annotations.csv')
+    else:
+        print(f"File does not exist: {file_path}")
 
 if __name__ == '__main__':
     main()
