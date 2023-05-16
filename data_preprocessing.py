@@ -29,9 +29,6 @@ def process_data(data):
     ecg_channel_name = channels[ecg_channel_idx]
     ecg_data = raw_data[ecg_channel_idx]
     sampling_rate = info['sfreq']
-    # print(sampling_rate)
-    # time_samples = int(0.16 * 60 * sampling_rate)
-    # ecg_data = ecg_data[:time_samples]
    
     out = biosppy.signals.ecg.ecg(ecg_data, sampling_rate=sampling_rate, show=False)
     rr_intervals_list = np.diff(out["ts"][out['rpeaks']]) * 1000 
@@ -168,41 +165,93 @@ def concatenate_sleep_scoring_files(directory_path):
     concatenated_df.set_index("patient_index", inplace=True)  # set the patient_index column as the index
     return concatenated_df
 
+def calculate_stats(dataframe, columns, output_csv):
+    selected_data = dataframe[columns]
+    
+    stats_dict = {
+        'Column': [],
+        'Mean': [],
+        'Max': [],
+        'Min': [],
+        'Std Dev': [],
+        'Variance': []
+    }
+    
+    for column in columns:
+        column_data = selected_data[column]
+        
+        mean = column_data.mean()
+        maximum = column_data.max()
+        minimum = column_data.min()
+        std_dev = column_data.std()
+        variance = column_data.var()
+        
+        stats_dict['Column'].append(column)
+        stats_dict['Mean'].append(mean)
+        stats_dict['Max'].append(maximum)
+        stats_dict['Min'].append(minimum)
+        stats_dict['Std Dev'].append(std_dev)
+        stats_dict['Variance'].append(variance)
+        
+    stats_df = pd.DataFrame(stats_dict)
+    
+    stats_df.to_csv(output_csv, index=False) 
+    
+    return stats_df
+
 def main():
 
-    file_name = "SN015.edf"
-    file_path = os.path.join("/home/mkopcz/Desktop/hrv-analiza/haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings", file_name)
-    print(f"Checking file: {file_path}")
+    # #files handling
+    edf_paths = []
+    for i in range(1, 155):
+        if i < 10:
+            file_name = f"SN00{i}.edf"
+            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
+            if os.path.isfile(file_path):
+                edf_paths.append(file_path)
 
-    if os.path.isfile(file_path):
-        print(f"Processing file: {file_path}")
-        edf_path = file_path
-        data = loading_ecg_data(edf_path)
+        if i < 100:
+            file_name = f"SN0{i}.edf"
+            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
+            if os.path.isfile(file_path):
+                edf_paths.append(file_path)
+        else:
+            file_name = f"SN{i}.edf"
+            file_path = os.path.join("haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/", file_name)
+            if os.path.isfile(file_path):
+                edf_paths.append(file_path)
+
+    df_data = []
+    hr_data = []
+    for i in range(len(edf_paths)):
+        data = loading_ecg_data(edf_paths[i])
         ecg_data, out, rr_intervals_list, rr_intervals_without_outliers, interpolated_rr_intervals, nn_intervals_list, interpolated_nn_intervals = process_data(data)
-        patient_index = extract_patient_index(file_path)
-        print(patient_index)
+        patient_index = extract_patient_index(edf_paths[i])
         hrv_indices, heart_rate_value = hrv_analysis(interpolated_nn_intervals, window_duration=270, step_size=30, patient_index=patient_index)
-        # plot_ecg_and_r_peaks(ecg_data, out)
-        print(heart_rate_value)
 
         if heart_rate_value is not None:
-            print(f"Writing HR results to results_hr.csv")
-            heart_rate_value.set_index("patient_index", inplace=True)
-            heart_rate_value.to_csv('results_hr.csv')
-
+            hr_data.append(heart_rate_value)
         if hrv_indices is not None:
-            print(f"Writing HRV indices to features.csv")
-            hrv_indices.set_index("patient_index", inplace=True)
-            result_final = hrv_indices.drop(['sdnn', 'cvnni', 'cvi', 'nni_50', 'nni_20', 'pnni_20', 'rmssd', 'range_nni',
-                                      'cvsd','std_hr', 'lf', 'hf', 'lf_hf_ratio', 'hfnu', 'total_power', 'vlf',
-                                      'sd1', 'sd2', 'ratio_sd2_sd1','Modified_csi'], axis=1)
-            result_final.to_csv('features.csv')
+            df_data.append(hrv_indices)
 
-        print(f"Writing annotations to annotations.csv")
-        annotations = concatenate_sleep_scoring_files('haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/')
-        annotations.to_csv('annotations.csv')
-    else:
-        print(f"File does not exist: {file_path}")
+    results_hr = pd.concat(hr_data)
+    results_hr.set_index("patient_index", inplace=True)
+    results_hr.to_csv('results_hr.csv')
 
+    result = pd.concat(df_data)
+    result.set_index("patient_index", inplace=True)
+    result_final = result.drop(['sdnn', 'cvnni', 'cvi', 'nni_50', 'nni_20', 'pnni_20', 'rmssd', 'range_nni',
+                          'cvsd','std_hr', 'lf'
+                          , 'hf', 'lf_hf_ratio', 'hfnu', 'total_power', 'vlf', 'sd1', 'sd2', 'ratio_sd2_sd1',
+                           'Modified_csi'], axis=1)
+
+    result_final.to_csv('features.csv')
+    annotations = concatenate_sleep_scoring_files('haaglanden-medisch-centrum-sleep-staging-database-1.1/recordings/')
+    annotations.to_csv('annotations.csv')
+
+    df = pd.read_csv('features.csv')
+    output_file = 'statistics_for_whole_population.csv'
+    result = calculate_stats(df, ['mean_nni', 'mean_hr', 'max_hr', 'min_hr'], output_file)
+    
 if __name__ == '__main__':
     main()
