@@ -1,0 +1,59 @@
+
+# Configuration for ECG Data Preparation
+# This configuration file contains the parameters for processing ECG data
+name: ecg_data_preparation
+
+
+# Directory paths for data processing - this is only proposed structure, you can change it
+directories:
+  # Path to the directory containing sleep scoring files
+  data_directory: Desktop/sleep-phases-detection/physionet.org/files/hmc-sleep-staging/1.1/recordings
+
+  # Path to the directory containing EDF files
+  edf_directory: /Desktop/sleep-phases-detection/physionet.org/files/hmc-sleep-staging/1.1/recordings
+
+  # Directory to save the generated plots
+  plots_directory: Desktop/sleep-phases-detection/plots
+
+  # Path to save the heart rate results CSV file
+  output_hr_file: Desktop/sleep-phases-detection
+
+  # Path to save the features results CSV file
+  output_features_file: Desktop/sleep-phases-detection
+
+  # Path to save the annotations CSV file
+  output_annotations_file: Desktop/sleep-phases-detection
+
+  # Path to save the statistics results CSV file
+  output_stats_file: Desktop/sleep-phases-detection
+
+# Plotting configuration
+plotting:
+  # Flag to indicate whether to plot ECG data with R-peaks
+  plot_ecg: True
+
+  # Sampling rate by the device in Hz
+  sampling_rate: 256
+
+  # Segment length for plotting ECG 
+  segment_length: 10000
+
+# Analysis parameters
+analysis:
+  # Duration of each window for HRV analysis in seconds
+  window_duration: 270
+
+  # Step size for the sliding window in seconds
+  step_size: 30
+
+  # Lower threshold for R-R interval outlier removal in milliseconds
+  low_rri: 300
+
+  # Upper threshold for R-R interval outlier removal in milliseconds
+  high_rri: 2000
+
+  # Method for interpolating NaN values in R-R intervals
+  interpolation_method: "linear"
+
+  # Method for removing ectopic beats from R-R intervals
+  ectopic_beat_removal_method: "malik"

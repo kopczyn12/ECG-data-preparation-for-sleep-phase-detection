@@ -1,0 +1,9 @@
+pipeline:
+  name: ecg_data_preparation
+logger:
+  level: DEBUG
+  name: main_logger
+  format: '[%(asctime)s] [%(levelname)-8s] [%(filename)s:%(lineno)d]- %(message)s'
+  date_format: '%Y-%m-%d %H:%M:%S'
+  out_file: outputs/pipeline_${now:%Y-%m-%d}-${now:%H-%M-%S}.log
+  main_logger: True
