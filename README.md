@@ -15,6 +15,9 @@ This project processes raw ECG data to extract features that are indicative of d
 4. **Plotting**: Visualize ECG data with detected R-peaks.
 5. **Statistical Analysis**: Calculate statistical metrics for the extracted features.
 
+For whole project, adding ML classifier could be:
+![Workflow](workflow.jpg)
+
 ## Features
 
 ![Features](features.png)
