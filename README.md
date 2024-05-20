@@ -21,6 +21,7 @@ For whole project, adding ML classifier could be:
 ## Features
 
 ![Features](features.png)
+
 The features extracted from the ECG data include various time-domain and frequency-domain HRV indices, as well as additional statistical metrics. These features are used to train machine learning models to classify sleep phases.
 
 ## How to Run the Project
