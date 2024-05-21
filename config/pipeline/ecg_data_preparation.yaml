@@ -16,16 +16,16 @@ directories:
   plots_directory: Desktop/sleep-phases-detection/plots
 
   # Path to save the heart rate results CSV file
-  output_hr_file: Desktop/sleep-phases-detection
+  output_hr_file: Desktop/sleep-phases-detection/hr_results.csv
 
   # Path to save the features results CSV file
-  output_features_file: Desktop/sleep-phases-detection
+  output_features_file: Desktop/sleep-phases-detection/features_results.csv
 
   # Path to save the annotations CSV file
-  output_annotations_file: Desktop/sleep-phases-detection
+  output_annotations_file: Desktop/sleep-phases-detection/annotations.csv
 
   # Path to save the statistics results CSV file
-  output_stats_file: Desktop/sleep-phases-detection
+  output_stats_file: Desktop/sleep-phases-detection/stats_results.csv
 
 # Plotting configuration
 plotting:
