@@ -480,9 +480,25 @@ def dataset_preparation(cfg: DictConfig) -> None:
     annotations.to_csv(cfg.pipeline.directories.output_annotations_file)
     logger.info(f"Saved sleep scoring annotations to {cfg.pipeline.directories.output_annotations_file}")
 
+    # Concatenate annotations and features to achieve final dataset
+    # Define valid annotations
+    valid_annotations = [' W', ' N1', ' N2', ' N3', ' R']
+
+    # Join the dataframes
+    dataset = result_final.join(annotations)
+
+    # Filter the dataset to keep only rows with valid annotations
+    dataset_filtered = dataset[dataset['Annotation'].isin(valid_annotations)]
+
+    # Save the filtered dataset to CSV (assuming cfg.pipeline.directories has been defined and contains the paths)
+    dataset_filtered.to_csv(cfg.pipeline.directories.output_dataset_file)
+
+    # Logging the save action
+    logger.info(f"Saved filtered dataset to {cfg.pipeline.directories.output_dataset_file}")
+
     # Calculate and save statistics
     df = pd.read_csv(cfg.pipeline.directories.output_features_file)
-    calculate_stats(df, ['mean_nni', 'mean_hr', 'max_hr', 'min_hr'], cfg.pipeline.directories.stats_output_file)
+    calculate_stats(df, ['mean_nni', 'mean_hr', 'max_hr', 'min_hr'], cfg.pipeline.directories.output_stats_file)
     logger.info(f"Saved statistics to {cfg.pipeline.directories.output_stats_file}")
 
 

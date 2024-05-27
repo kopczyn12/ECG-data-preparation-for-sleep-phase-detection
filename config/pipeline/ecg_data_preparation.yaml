@@ -10,7 +10,7 @@ directories:
   data_directory: Desktop/sleep-phases-detection/physionet.org/files/hmc-sleep-staging/1.1/recordings
 
   # Path to the directory containing EDF files
-  edf_directory: /Desktop/sleep-phases-detection/physionet.org/files/hmc-sleep-staging/1.1/recordings
+  edf_directory: Desktop/sleep-phases-detection/physionet.org/files/hmc-sleep-staging/1.1/recordings
 
   # Directory to save the generated plots
   plots_directory: Desktop/sleep-phases-detection/plots
@@ -26,6 +26,8 @@ directories:
 
   # Path to save the statistics results CSV file
   output_stats_file: Desktop/sleep-phases-detection/stats_results.csv
+
+  output_dataset_file: Desktop/sleep-phases-detection/dataset.csv
 
 # Plotting configuration
 plotting:
