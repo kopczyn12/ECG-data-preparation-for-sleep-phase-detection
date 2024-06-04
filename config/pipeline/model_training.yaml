@@ -1,0 +1,52 @@
+# Name of the pipeline configuration
+name: model_training
+
+results_path: Desktop/sleep-phases-detection/metrics
+feature_importance_path: Desktop/sleep-phases-detection/feature_importance
+# Dataset configuration
+dataset:
+  # Path to the CSV file containing the dataset
+  file_path: Desktop/sleep-phases-detection/dataset.csv
+
+  # Number of folds for stratified cross-validation
+  folds_split: 5
+
+  # Random seed for reproducibility
+  random_state: 42
+
+  test_size: 0.2
+
+# Model configuration
+models:
+  # Path to save the trained models
+  save_path: Desktop/sleep-phases-detection/models
+
+  # Configuration for Random Forest model
+  random_forest:
+    # Number of trees in the forest
+    n_estimators: 500
+
+    # Maximum depth of the tree
+    max_depth: 15
+
+    # Random seed for reproducibility
+    random_state: 42
+
+  # Configuration for XGBoost model
+  xgboost:
+    # Number of boosting rounds
+    n_estimators: 500
+
+    # Maximum depth of the tree
+    max_depth: 15
+
+    # Learning rate (shrinkage)
+    learning_rate: 0.1
+
+    # Random seed for reproducibility
+    random_state: 42
+
+# Configuration for saving the confusion matrix plot
+confusion_matrix:
+  # Path to save the confusion matrix plot
+  path: Desktop/sleep-phases-detection/results
