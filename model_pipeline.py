@@ -19,7 +19,7 @@ def pipeline(cfg: DictConfig) -> None:
     """
     # Initialize logger
     initialize_logger(cfg)
-    if cfg.pipeline.name == "model_pipeline":
+    if cfg.pipeline.name == "model_training":
         logger.info("Configuration:\n{}".format(OmegaConf.to_yaml(cfg)))
 
         # Train and evaluate the model
