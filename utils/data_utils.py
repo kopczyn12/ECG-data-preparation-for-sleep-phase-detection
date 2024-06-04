@@ -50,7 +50,7 @@ def loading_ecg_data(file: str) -> Raw:
     return data
 
 
-def process_data(cfg: DictConfig, data: Any) -> Tuple[np.ndarray, dict, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def process_data(cfg: DictConfig, data: Any) -> Tuple[np.ndarray, dict, np.ndarray]:
     """
     Processes ECG data to extract and preprocess R-R intervals.
 
@@ -64,42 +64,48 @@ def process_data(cfg: DictConfig, data: Any) -> Tuple[np.ndarray, dict, np.ndarr
               out (dict): The output dictionary from biosppy containing ECG analysis results.
               interpolated_nn_intervals (np.ndarray): NN intervals after interpolation of NaN values and processing.
     """
+    try:
+        # Extract raw data, metadata, and channel names
+        raw_data = data.get_data()
+        info = data.info
+        channels = data.ch_names
 
-    # Extract raw data, metadata, and channel names
-    raw_data = data.get_data()
-    info = data.info
-    channels = data.ch_names
+        # Define the index and name for the ECG channel
+        ecg_channel_idx = 7
+        ecg_channel_name = channels[ecg_channel_idx]
 
-    # Define the index and name for the ECG channel
-    ecg_channel_idx = 7
-    ecg_channel_name = channels[ecg_channel_idx]
+        # Extract ECG data for the specified channel
+        ecg_data = raw_data[ecg_channel_idx]
 
-    # Extract ECG data for the specified channel
-    ecg_data = raw_data[ecg_channel_idx]
+        # Get the sampling rate from the metadata
+        sampling_rate = info['sfreq']
+        logger.info(f"Sampling rate: {sampling_rate}")
 
-    # Get the sampling rate from the metadata
-    sampling_rate = info['sfreq']
-    logger.info(f"Sampling rate: {sampling_rate}")
+        # Perform ECG analysis using biosppy
+        out = biosppy.signals.ecg.ecg(ecg_data, sampling_rate=sampling_rate, show=False)
 
-    # Perform ECG analysis using biosppy
-    out = biosppy.signals.ecg.ecg(ecg_data, sampling_rate=sampling_rate, show=False)
+        # Compute R-R intervals in milliseconds
+        rr_intervals_list = np.diff(out["ts"][out['rpeaks']]) * 1000
 
-    # Compute R-R intervals in milliseconds
-    rr_intervals_list = np.diff(out["ts"][out['rpeaks']]) * 1000
+        # Preprocess R-R intervals by removing outliers
+        rr_intervals_without_outliers = remove_outliers(rr_intervals=rr_intervals_list, low_rri=cfg.pipeline.analysis.low_rri, high_rri=cfg.pipeline.analysis.high_rri)
 
-    # Preprocess R-R intervals by removing outliers
-    rr_intervals_without_outliers = remove_outliers(rr_intervals=rr_intervals_list, low_rri=cfg.pipeline.analysis.low_rri, high_rri=cfg.pipeline.analysis.high_rri)
+        # Interpolate NaN values in the R-R intervals
+        interpolated_rr_intervals = interpolate_nan_values(rr_intervals=rr_intervals_without_outliers, interpolation_method=cfg.pipeline.analysis.interpolation_method)
 
-    # Interpolate NaN values in the R-R intervals
-    interpolated_rr_intervals = interpolate_nan_values(rr_intervals=rr_intervals_without_outliers, interpolation_method=cfg.pipeline.analysis.interpolation_method)
+        # Remove ectopic beats from the R-R intervals to get NN intervals
+        nn_intervals_list = remove_ectopic_beats(rr_intervals=interpolated_rr_intervals, method=cfg.pipeline.analysis.ectopic_beat_removal_method)
 
-    # Remove ectopic beats from the R-R intervals to get NN intervals
-    nn_intervals_list = remove_ectopic_beats(rr_intervals=interpolated_rr_intervals, method=cfg.pipeline.analysis.ectopic_beat_removal_method)
+        # Interpolate NaN values in the NN intervals
+        interpolated_nn_intervals = interpolate_nan_values(rr_intervals=nn_intervals_list)
 
-    # Interpolate NaN values in the NN intervals
-    interpolated_nn_intervals = interpolate_nan_values(rr_intervals=nn_intervals_list)
+        return ecg_data, out, interpolated_nn_intervals
 
-    return ecg_data, out, interpolated_nn_intervals
+    except ValueError as e:
+        logger.error(f"Error processing ECG data: {e}")
+        # Return None or any other indicator to signify that processing failed
+        return None, None, None
+
 
 def plot_ecg_and_r_peaks(ecg_data: np.ndarray, out: Dict[str, Any], save_dir: str, file_name: str, segment_length: int = 10000, sampling_rate: int = 256) -> None:
     """
@@ -155,23 +161,141 @@ def plot_ecg_and_r_peaks(ecg_data: np.ndarray, out: Dict[str, Any], save_dir: st
     # Close the plot to free up memory
     plt.close()
 
+def calculate_stats(dataframe: pd.DataFrame, columns: List[str], output_csv: str) -> pd.DataFrame:
+    """
+    Calculates statistical metrics for selected columns in a DataFrame and saves the results to a CSV file.
+
+    Args:
+        dataframe (pd.DataFrame): The input DataFrame containing the data.
+        columns (List[str]): A list of column names to calculate statistics for.
+        output_csv (str): The path to the output CSV file where the statistics will be saved.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the calculated statistics.
+    """
+    # Select specified columns from the DataFrame
+    selected_data = dataframe[columns]
+
+    # Dictionary to hold the statistics for each column
+    stats_dict = {
+        'Column': [],
+        'Mean': [],
+        'Max': [],
+        'Min': [],
+        'Std Dev': [],
+        'Variance': []
+    }
+
+    # Calculate statistics for each specified column
+    for column in columns:
+        column_data = selected_data[column]
+
+        mean = column_data.mean()
+        maximum = column_data.max()
+        minimum = column_data.min()
+        std_dev = column_data.std()
+        variance = column_data.var()
+
+        # Append the statistics to the dictionary
+        stats_dict['Column'].append(column)
+        stats_dict['Mean'].append(mean)
+        stats_dict['Max'].append(maximum)
+        stats_dict['Min'].append(minimum)
+        stats_dict['Std Dev'].append(std_dev)
+        stats_dict['Variance'].append(variance)
+
+    # Convert the dictionary to a DataFrame
+    stats_df = pd.DataFrame(stats_dict)
+
+    # Save the statistics DataFrame to a CSV file
+    stats_df.to_csv(output_csv, index=False)
+
+    return stats_df
+
+def calculate_total_duration(data: np.ndarray, sampling_rate: int) -> int:
+    """
+    Calculate the total duration of the signal in seconds.
+
+    Args:
+        data (np.ndarray): The ECG data array.
+        sampling_rate (int): The sampling rate of the ECG data.
+
+    Returns:
+        int: Total duration in seconds.
+    """
+    return len(data) // sampling_rate
+
+def process_sleep_scoring_files(directory_path: str) -> pd.DataFrame:
+    """
+    Processes sleep scoring files from a specified directory and concatenates them into a single DataFrame.
+
+    Args:
+        directory_path (str): Path to the directory containing sleep scoring files.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing concatenated sleep scoring data with patient indices.
+    """
+    data_frames = []  # List to hold all data frames
+    filenames = os.listdir(directory_path)
+    filenames.sort()  # Sort the filenames in ascending order
+
+    annotation_set = False
+    for filename in filenames:
+        if filename.endswith('.txt'):
+            file_path = os.path.join(directory_path, filename)
+            patient_index = filename.split('_')[0]  # Get the patient index from the filename
+
+            # Read the file into a DataFrame
+            df = pd.read_csv(file_path, sep=',', header=None, usecols=[4], skiprows=1, names=['Annotation'])
+            df['patient_index'] = patient_index  # Add the patient index column
+
+            # Add DataFrame to the list, handling the first file separately to avoid duplicate header
+            if not annotation_set:
+                annotation_set = True
+                data_frames.append(df[['Annotation', 'patient_index']])
+            else:
+                data_frames.append(df[['Annotation', 'patient_index']].iloc[1:])
+
+    # Concatenate all data frames into one
+    concatenated_df = pd.concat(data_frames)
+
+    # Remove 'Sleep stage' from Annotation column values
+    concatenated_df['Annotation'] = concatenated_df['Annotation'].str.replace('Sleep stage ', '')
+
+    # Set the patient_index column as the index
+    concatenated_df.set_index("patient_index", inplace=True)
+
+    return concatenated_df
+
+def calculate_window_size(total_duration: int, num_annotations: int) -> int:
+    """
+    Calculates the window size to match the number of annotations.
+
+    Args:
+        total_duration (int): Total duration of the signal in seconds.
+        num_annotations (int): Number of annotations to match.
+
+    Returns:
+        int: The window size in seconds.
+    """
+    return total_duration // num_annotations
+
 def hrv_analysis(interpolated_nn_intervals: np.ndarray,
-                 window_duration: int = 270,
-                 step_size: int = 30,
+                 window_duration: int,
+                 step_size: int,
                  patient_index: str = '') -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Performs HRV (Heart Rate Variability) analysis on interpolated NN intervals.
 
     Args:
         interpolated_nn_intervals (np.ndarray): Array of interpolated NN intervals.
-        window_duration (int, optional): Duration of each window for analysis in seconds. Defaults to 270.
-        step_size (int, optional): Step size for sliding window in seconds. Defaults to 30.
+        window_duration (int): Duration of each window for analysis in seconds.
+        step_size (int): Step size for sliding window in seconds.
         patient_index (str, optional): Identifier for the patient. Defaults to an empty string.
 
     Returns:
         Tuple[pd.DataFrame, pd.DataFrame]: Two DataFrames containing HRV indices and heart rate values respectively.
     """
-
     num_intervals = len(interpolated_nn_intervals)
     epoch_intervals = int(window_duration)
     step_intervals = int(step_size)
@@ -269,143 +393,6 @@ def hrv_analysis(interpolated_nn_intervals: np.ndarray,
     # Convert the list of dictionaries to DataFrames and return
     return pd.DataFrame(hrv_indices), pd.DataFrame(hr_values)
 
-
-def concatenate_sleep_scoring_files(directory_path: str) -> pd.DataFrame:
-    """
-    Concatenates sleep scoring files from a directory into a single DataFrame.
-
-    Args:
-        directory_path (str): Path to the directory containing sleep scoring files.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing concatenated sleep scoring data with patient indices.
-    """
-
-    data_frames = []  # List to hold all data frames
-    filenames = os.listdir(directory_path)
-    filenames.sort()  # Sort the filenames in ascending order
-
-    annotation_set = False
-    for filename in filenames:
-        if filename.endswith('.txt'):
-            file_path = os.path.join(directory_path, filename)
-            patient_index = filename.split('_')[0]  # Get the patient index from the filename
-
-            # Read the file into a DataFrame
-            df = pd.read_csv(file_path, sep=',', header=None, usecols=[4], skiprows=1, names=['Annotation'])
-            df['patient_index'] = patient_index  # Add the patient index column
-
-            # Add DataFrame to the list, handling the first file separately to avoid duplicate header
-            if not annotation_set:
-                annotation_set = True
-                data_frames.append(df[['Annotation', 'patient_index']])
-            else:
-                data_frames.append(df[['Annotation', 'patient_index']].iloc[1:])
-
-    # Concatenate all data frames into one
-    concatenated_df = pd.concat(data_frames)
-
-    # Remove 'Sleep stage' from Annotation column values
-    concatenated_df['Annotation'] = concatenated_df['Annotation'].str.replace('Sleep stage ', '')
-
-    # Set the patient_index column as the index
-    concatenated_df.set_index("patient_index", inplace=True)
-
-    return concatenated_df
-
-def calculate_stats(dataframe: pd.DataFrame, columns: List[str], output_csv: str) -> pd.DataFrame:
-    """
-    Calculates statistical metrics for selected columns in a DataFrame and saves the results to a CSV file.
-
-    Args:
-        dataframe (pd.DataFrame): The input DataFrame containing the data.
-        columns (List[str]): A list of column names to calculate statistics for.
-        output_csv (str): The path to the output CSV file where the statistics will be saved.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the calculated statistics.
-    """
-    # Select specified columns from the DataFrame
-    selected_data = dataframe[columns]
-
-    # Dictionary to hold the statistics for each column
-    stats_dict = {
-        'Column': [],
-        'Mean': [],
-        'Max': [],
-        'Min': [],
-        'Std Dev': [],
-        'Variance': []
-    }
-
-    # Calculate statistics for each specified column
-    for column in columns:
-        column_data = selected_data[column]
-
-        mean = column_data.mean()
-        maximum = column_data.max()
-        minimum = column_data.min()
-        std_dev = column_data.std()
-        variance = column_data.var()
-
-        # Append the statistics to the dictionary
-        stats_dict['Column'].append(column)
-        stats_dict['Mean'].append(mean)
-        stats_dict['Max'].append(maximum)
-        stats_dict['Min'].append(minimum)
-        stats_dict['Std Dev'].append(std_dev)
-        stats_dict['Variance'].append(variance)
-
-    # Convert the dictionary to a DataFrame
-    stats_df = pd.DataFrame(stats_dict)
-
-    # Save the statistics DataFrame to a CSV file
-    stats_df.to_csv(output_csv, index=False)
-
-    return stats_df
-
-def process_sleep_scoring_files(directory_path: str) -> pd.DataFrame:
-    """
-    Processes sleep scoring files from a specified directory and concatenates them into a single DataFrame.
-
-    Args:
-        directory_path (str): Path to the directory containing sleep scoring files.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing concatenated sleep scoring data with patient indices.
-    """
-    data_frames = []  # List to hold all data frames
-    filenames = os.listdir(directory_path)
-    filenames.sort()  # Sort the filenames in ascending order
-
-    annotation_set = False
-    for filename in filenames:
-        if filename.endswith('.txt'):
-            file_path = os.path.join(directory_path, filename)
-            patient_index = filename.split('_')[0]  # Get the patient index from the filename
-
-            # Read the file into a DataFrame
-            df = pd.read_csv(file_path, sep=',', header=None, usecols=[4], skiprows=1, names=['Annotation'])
-            df['patient_index'] = patient_index  # Add the patient index column
-
-            # Add DataFrame to the list, handling the first file separately to avoid duplicate header
-            if not annotation_set:
-                annotation_set = True
-                data_frames.append(df[['Annotation', 'patient_index']])
-            else:
-                data_frames.append(df[['Annotation', 'patient_index']].iloc[1:])
-
-    # Concatenate all data frames into one
-    concatenated_df = pd.concat(data_frames)
-
-    # Remove 'Sleep stage' from Annotation column values
-    concatenated_df['Annotation'] = concatenated_df['Annotation'].str.replace('Sleep stage ', '')
-
-    # Set the patient_index column as the index
-    concatenated_df.set_index("patient_index", inplace=True)
-
-    return concatenated_df
-
 def dataset_preparation(cfg: DictConfig) -> None:
     """
     Main function to process ECG and sleep scoring data, extract HRV features, and save the results to CSV files.
@@ -416,11 +403,16 @@ def dataset_preparation(cfg: DictConfig) -> None:
         None
     """
 
+    # Process and save annotations
+    annotations = process_sleep_scoring_files(cfg.pipeline.directories.data_directory)
+    annotations.to_csv(cfg.pipeline.directories.output_annotations_file)
+    logger.info(f"Saved sleep scoring annotations to {cfg.pipeline.directories.output_annotations_file}")
+
     # List to store paths of EDF files
     edf_paths = []
     logger.info("Collecting EDF file paths...")
     # Collect EDF file paths
-    for i in range(1, 155):
+    for i in range(1, 70):
         if i < 10:
             file_name = f"SN00{i}.edf"
         elif i < 100:
@@ -431,75 +423,103 @@ def dataset_preparation(cfg: DictConfig) -> None:
         file_path = os.path.join(cfg.pipeline.directories.edf_directory, file_name)
         if os.path.isfile(file_path):
             edf_paths.append(file_path)
+
     df_data = []
     hr_data = []
     logger.info("Processing EDF files...")
     # Process each EDF file
     for file_path in edf_paths:
         logger.info(f"Processing file: {file_path}")
-        data = loading_ecg_data(file_path)
-        logger.info(f"Loaded ECG data from {file_path}")
-        ecg_data, out, interpolated_nn_intervals = process_data(cfg, data)
-        logger.info(f"Processed ECG data from {file_path}")
-        patient_index = extract_patient_index(file_path)
-        logger.info(f"Extracted patient index: {patient_index}")
-        if cfg.pipeline.plotting.plot_ecg:
-            if not os.path.exists(cfg.pipeline.directories.plots_directory):
-                os.makedirs(cfg.pipeline.directories.plots_directory, exist_ok=True)
-            logger.info("Plotting ECG signal with R-peaks...")
-            plot_ecg_and_r_peaks(ecg_data, out, cfg.pipeline.directories.plots_directory, f"{patient_index}_ecg_plot.png", segment_length=cfg.pipeline.plotting.segment_length, sampling_rate=cfg.pipeline.plotting.sampling_rate)
-            logger.info(f"Plot saved at {cfg.pipeline.directories.plots_directory}")
-        logger.info("Performing HRV analysis...")
-        hrv_indices, heart_rate_value = hrv_analysis(interpolated_nn_intervals, window_duration=cfg.pipeline.analysis.window_duration, step_size=cfg.pipeline.analysis.step_size, patient_index=patient_index)
-        logger.info("HRV analysis completed.")
+        try:
+            data = loading_ecg_data(file_path)
+            logger.info(f"Loaded ECG data from {file_path}")
+            ecg_data, out, interpolated_nn_intervals = process_data(cfg, data)
+            if ecg_data is None:
+                logger.warning(f"Skipping file {file_path} due to insufficient beats for heart rate computation.")
+                continue
+            logger.info(f"Processed ECG data from {file_path}")
+            patient_index = extract_patient_index(file_path)
+            logger.info(f"Extracted patient index: {patient_index}")
 
-        if heart_rate_value is not None:
-            hr_data.append(heart_rate_value)
-        if hrv_indices is not None:
-            df_data.append(hrv_indices)
+            # Get number of annotations for the current patient
+            patient_annotations = annotations.loc[annotations.index == patient_index]
+            num_annotations = len(patient_annotations)
+            logger.info(f"Number of annotations for patient {patient_index}: {num_annotations}")
+
+            # Calculate the total duration of the signal
+            total_duration = calculate_total_duration(ecg_data, cfg.pipeline.analysis.sampling_rate)
+
+            if cfg.pipeline.plotting.plot_ecg:
+                if not os.path.exists(cfg.pipeline.directories.plots_directory):
+                    os.makedirs(cfg.pipeline.directories.plots_directory, exist_ok=True)
+                logger.info("Plotting ECG signal with R-peaks...")
+                plot_ecg_and_r_peaks(ecg_data, out, cfg.pipeline.directories.plots_directory, f"{patient_index}_ecg_plot.png", segment_length=cfg.pipeline.plotting.segment_length, sampling_rate=cfg.pipeline.plotting.sampling_rate)
+                logger.info(f"Plot saved at {cfg.pipeline.directories.plots_directory}")
+            logger.info("Performing HRV analysis...")
+
+            # Perform HRV analysis with dynamically calculated window duration
+            window_duration = calculate_window_size(total_duration, num_annotations)
+            hrv_indices, heart_rate_value = hrv_analysis(
+                interpolated_nn_intervals,
+                window_duration=window_duration,
+                step_size=window_duration,  # Ensuring non-overlapping windows to match the annotation count
+                patient_index=patient_index
+            )
+            logger.info("HRV analysis completed.")
+
+            if heart_rate_value is not None:
+                hr_data.append(heart_rate_value)
+            if hrv_indices is not None:
+                df_data.append(hrv_indices)
+        except Exception as e:
+            logger.error(f"Error processing file {file_path}: {e}")
+            continue
+
     logger.info("Saving results to CSV files...")
     # Save heart rate results
-    results_hr = pd.concat(hr_data)
-    results_hr.set_index("patient_index", inplace=True)
-    results_hr.to_csv(cfg.pipeline.directories.output_hr_file)
-    logger.info(f"Saved heart rate results to {cfg.pipeline.directories.output_hr_file}")
+    if hr_data:
+        results_hr = pd.concat(hr_data)
+        results_hr.set_index("patient_index", inplace=True)
+        results_hr.to_csv(cfg.pipeline.directories.output_hr_file)
+        logger.info(f"Saved heart rate results to {cfg.pipeline.directories.output_hr_file}")
+    else:
+        logger.warning("No heart rate data to save.")
 
-    # Save HRV feature results
-    result = pd.concat(df_data)
-    result.set_index("patient_index", inplace=True)
-    result_final = result.drop([
-        'sdnn', 'cvnni', 'cvi', 'nni_50', 'nni_20', 'pnni_20', 'rmssd',
-        'range_nni', 'cvsd', 'std_hr', 'lf', 'hf', 'lf_hf_ratio', 'hfnu',
-        'total_power', 'vlf', 'sd1', 'sd2', 'ratio_sd2_sd1', 'Modified_csi'
-    ], axis=1)
-    result_final.to_csv(cfg.pipeline.directories.output_features_file)
-    logger.info(f"Saved HRV feature results to {cfg.pipeline.directories.output_features_file}")
-
-    # Process and save annotations
-    annotations = process_sleep_scoring_files(cfg.pipeline.directories.data_directory)
-    annotations.to_csv(cfg.pipeline.directories.output_annotations_file)
-    logger.info(f"Saved sleep scoring annotations to {cfg.pipeline.directories.output_annotations_file}")
+    if df_data:
+        results_df = pd.concat(df_data)
+        results_df.set_index("patient_index", inplace=True)
+        result_final = results_df.drop([
+            'sdnn', 'cvnni', 'cvi', 'nni_50', 'nni_20', 'pnni_20', 'rmssd',
+            'range_nni', 'cvsd', 'std_hr', 'lf', 'hf', 'lf_hf_ratio', 'hfnu',
+            'total_power', 'vlf', 'sd1', 'sd2', 'ratio_sd2_sd1', 'Modified_csi'
+        ], axis=1)
+        result_final.to_csv(cfg.pipeline.directories.output_features_file)
+        logger.info(f"Saved HRV feature results to {cfg.pipeline.directories.output_features_file}")
+    else:
+        logger.warning("No HRV indices data to save.")
 
     # Concatenate annotations and features to achieve final dataset
     # Define valid annotations
     valid_annotations = [' W', ' N1', ' N2', ' N3', ' R']
 
     # Join the dataframes
-    dataset = result_final.join(annotations)
-
-    # Filter the dataset to keep only rows with valid annotations
-    dataset_filtered = dataset[dataset['Annotation'].isin(valid_annotations)]
-
-    # Save the filtered dataset to CSV (assuming cfg.pipeline.directories has been defined and contains the paths)
-    dataset_filtered.to_csv(cfg.pipeline.directories.output_dataset_file)
-
-    # Logging the save action
-    logger.info(f"Saved filtered dataset to {cfg.pipeline.directories.output_dataset_file}")
+    if not result_final.empty and not annotations.empty:
+        dataset = result_final.join(annotations)
+        # Filter the dataset to keep only rows with valid annotations
+        dataset_filtered = dataset[dataset['Annotation'].isin(valid_annotations)]
+        # Save the filtered dataset to CSV (assuming cfg.pipeline.directories has been defined and contains the paths)
+        dataset_filtered.to_csv(cfg.pipeline.directories.output_dataset_file)
+        logger.info(f"Saved filtered dataset to {cfg.pipeline.directories.output_dataset_file}")
+    else:
+        logger.warning("Not enough data to generate the final dataset.")
 
     # Calculate and save statistics
-    df = pd.read_csv(cfg.pipeline.directories.output_features_file)
-    calculate_stats(df, ['mean_nni', 'mean_hr', 'max_hr', 'min_hr'], cfg.pipeline.directories.output_stats_file)
-    logger.info(f"Saved statistics to {cfg.pipeline.directories.output_stats_file}")
+    if os.path.isfile(cfg.pipeline.directories.output_features_file):
+        df = pd.read_csv(cfg.pipeline.directories.output_features_file)
+        calculate_stats(df, ['mean_nni', 'mean_hr', 'max_hr', 'min_hr'], cfg.pipeline.directories.output_stats_file)
+        logger.info(f"Saved statistics to {cfg.pipeline.directories.output_stats_file}")
+    else:
+        logger.warning("Features file not found, skipping statistics calculation.")
 
 
 
