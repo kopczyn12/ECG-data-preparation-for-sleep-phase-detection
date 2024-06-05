@@ -154,7 +154,7 @@ def train_and_evaluate_model(model: Any, X_train: pd.DataFrame, y_train: pd.Seri
 
 def plot_confusion_matrix(y_test: pd.Series, y_pred: pd.Series, model_name: str, confusion_matrix_path: str) -> None:
     """
-    Plot the confusion matrix.
+    Plot the confusion matrix with percentages.
 
     Args:
         y_test (pd.Series): The true labels.
@@ -169,8 +169,10 @@ def plot_confusion_matrix(y_test: pd.Series, y_pred: pd.Series, model_name: str,
         y_pred = y_pred.map(inverse_annotation_mapping)
 
     cm = confusion_matrix(y_test, y_pred, labels=['W', 'R', 'Deep'])
-    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['W', 'R', 'Deep'])
-    disp.plot()
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm_normalized, display_labels=['W', 'R', 'Deep'])
+    disp.plot(cmap=plt.cm.Blues, values_format='.2f')
     plt.title(f'Confusion Matrix - {model_name}')
     plt.savefig(confusion_matrix_path)
     plt.close()
